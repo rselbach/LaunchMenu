@@ -1,0 +1,180 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.0.0)'
+        required: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  build:
+    runs-on: macos-15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+
+      - name: Select Xcode 16.3
+        run: sudo xcode-select -s /Applications/Xcode_16.3.app/Contents/Developer
+
+      - name: Set and validate version
+        id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          INPUT_VERSION: ${{ github.event.inputs.version }}
+        run: |
+          if [[ "${EVENT_NAME}" == "push" ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          elif [[ -n "${INPUT_VERSION}" ]]; then
+            VERSION="${INPUT_VERSION}"
+          else
+            VERSION="0.0.0-dev"
+          fi
+
+          VERSION_RE='^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?(\+[0-9A-Za-z]+([.-][0-9A-Za-z]+)*)?$'
+          if [[ "${VERSION}" != "0.0.0-dev" ]] && ! [[ "${VERSION}" =~ ${VERSION_RE} ]]; then
+            echo "::error::Invalid version '${VERSION}'. Expected semver like 1.2.3 or 1.2.3-rc.1"
+            exit 1
+          fi
+
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Update version in Info.plist
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${APP_VERSION}" Sources/Info.plist
+          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD_NUMBER}" Sources/Info.plist
+
+      - name: Run tests
+        run: swift test -c release
+
+      - name: Build release and assemble app bundle
+        run: |
+          swift build -c release
+          ./scripts/bundle-app.sh release
+
+      - name: Import signing certificate
+        env:
+          CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.DEVELOPER_ID_CERTIFICATE_PASSWORD }}
+        run: |
+          KEYCHAIN_PATH="${RUNNER_TEMP}/signing.keychain-db"
+          KEYCHAIN_PASSWORD="$(openssl rand -base64 32)"
+
+          security create-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security set-keychain-settings -lut 21600 "${KEYCHAIN_PATH}"
+          security unlock-keychain -p "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+
+          echo "${CERTIFICATE_P12}" | base64 --decode > "${RUNNER_TEMP}/certificate.p12"
+          security import "${RUNNER_TEMP}/certificate.p12" \
+            -P "${CERTIFICATE_PASSWORD}" \
+            -A \
+            -t cert \
+            -f pkcs12 \
+            -k "${KEYCHAIN_PATH}"
+
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "${KEYCHAIN_PASSWORD}" "${KEYCHAIN_PATH}"
+          security list-keychain -d user -s "${KEYCHAIN_PATH}" login.keychain-db
+
+          rm "${RUNNER_TEMP}/certificate.p12"
+
+      - name: Sign app bundle
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | grep "(${APPLE_TEAM_ID})" | head -n1 | sed -E 's/.*"(.*)"/\1/')"
+
+          if [[ -z "${SIGNING_IDENTITY}" ]]; then
+            echo "::error::Could not resolve Developer ID Application identity for team ${APPLE_TEAM_ID}"
+            exit 1
+          fi
+
+          codesign --force --options runtime \
+            --sign "${SIGNING_IDENTITY}" \
+            .build/release-bundle/LauncherMenu.app/Contents/MacOS/LauncherMenu
+
+          codesign --force --options runtime \
+            --sign "${SIGNING_IDENTITY}" \
+            .build/release-bundle/LauncherMenu.app
+
+      - name: Create DMG
+        env:
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+        run: |
+          mkdir -p .build/dmg/staging
+          cp -R .build/release-bundle/LauncherMenu.app .build/dmg/staging/
+          ln -s /Applications .build/dmg/staging/Applications
+
+          hdiutil create -volname "LauncherMenu" \
+            -srcfolder .build/dmg/staging \
+            -ov -format UDRW \
+            .build/dmg/LauncherMenu-temp.dmg
+
+          hdiutil convert .build/dmg/LauncherMenu-temp.dmg \
+            -format UDZO \
+            -imagekey zlib-level=9 \
+            -o .build/dmg/LauncherMenu.dmg
+
+          rm .build/dmg/LauncherMenu-temp.dmg
+          rm -rf .build/dmg/staging
+
+          SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | grep "(${APPLE_TEAM_ID})" | head -n1 | sed -E 's/.*"(.*)"/\1/')"
+          if [[ -z "${SIGNING_IDENTITY}" ]]; then
+            echo "::error::Could not resolve Developer ID Application identity for team ${APPLE_TEAM_ID}"
+            exit 1
+          fi
+
+          codesign --force --sign "${SIGNING_IDENTITY}" .build/dmg/LauncherMenu.dmg
+
+      - name: Verify signed artifacts
+        run: |
+          codesign --verify --deep --strict --verbose=2 .build/release-bundle/LauncherMenu.app
+          codesign --verify --strict --verbose=2 .build/dmg/LauncherMenu.dmg
+
+      - name: Notarize DMG
+        env:
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: |
+          xcrun notarytool submit .build/dmg/LauncherMenu.dmg \
+            --apple-id "${APPLE_ID}" \
+            --team-id "${APPLE_TEAM_ID}" \
+            --password "${APPLE_APP_PASSWORD}" \
+            --wait
+
+          xcrun stapler staple .build/dmg/LauncherMenu.dmg
+
+      - name: Rename DMG with version
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          mv .build/dmg/LauncherMenu.dmg ".build/dmg/LauncherMenu-${APP_VERSION}.dmg"
+
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: LauncherMenu-${{ steps.version.outputs.version }}
+          path: .build/dmg/LauncherMenu-${{ steps.version.outputs.version }}.dmg
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@a06a81a03ee405af7f2048a818ed3f03bbf83c7b # v2
+        with:
+          files: .build/dmg/LauncherMenu-${{ steps.version.outputs.version }}.dmg
+          generate_release_notes: true
+
+      - name: Cleanup keychain
+        if: always()
+        run: |
+          security delete-keychain "${RUNNER_TEMP}/signing.keychain-db" || true
