@@ -3,10 +3,15 @@ import AppKit
 @MainActor
 final class SettingsViewController: NSViewController {
     private let store: AppMappingsStore
+    private let settings: AppSettingsStore
     private var tableView = NSTableView()
+    private var optionsView = NSView()
+    private var startAtLoginCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private var behaviorPopup = NSPopUpButton(frame: .zero, pullsDown: false)
 
-    init(store: AppMappingsStore = .shared) {
+    init(store: AppMappingsStore = .shared, settings: AppSettingsStore = .shared) {
         self.store = store
+        self.settings = settings
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -18,6 +23,40 @@ final class SettingsViewController: NSViewController {
     override func loadView() {
         view = NSView()
         view.translatesAutoresizingMaskIntoConstraints = false
+
+        let tabView = NSTabView()
+        tabView.translatesAutoresizingMaskIntoConstraints = false
+
+        let generalItem = NSTabViewItem(identifier: "options")
+        generalItem.label = "General"
+        generalItem.view = buildOptionsView()
+
+        let mappingsItem = NSTabViewItem(identifier: "mappings")
+        mappingsItem.label = "Mappings"
+        mappingsItem.view = buildMappingsView()
+
+        tabView.addTabViewItem(generalItem)
+        tabView.addTabViewItem(mappingsItem)
+
+        view.addSubview(tabView)
+
+        NSLayoutConstraint.activate([
+            tabView.topAnchor.constraint(equalTo: view.topAnchor, constant: 12),
+            tabView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 12),
+            tabView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -12),
+            tabView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -12),
+        ])
+    }
+
+    override func viewWillAppear() {
+        super.viewWillAppear()
+        tableView.reloadData()
+        refreshOptions()
+    }
+
+    private func buildMappingsView() -> NSView {
+        let container = NSView()
+        container.autoresizingMask = [.width, .height]
 
         let scrollView = NSScrollView()
         scrollView.translatesAutoresizingMaskIntoConstraints = false
@@ -50,24 +89,100 @@ final class SettingsViewController: NSViewController {
         helpLabel.textColor = .secondaryLabelColor
         helpLabel.translatesAutoresizingMaskIntoConstraints = false
 
-        view.addSubview(helpLabel)
-        view.addSubview(scrollView)
+        container.addSubview(helpLabel)
+        container.addSubview(scrollView)
 
         NSLayoutConstraint.activate([
-            helpLabel.topAnchor.constraint(equalTo: view.topAnchor, constant: 16),
-            helpLabel.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            helpLabel.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
+            helpLabel.topAnchor.constraint(equalTo: container.topAnchor, constant: 16),
+            helpLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            helpLabel.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
 
             scrollView.topAnchor.constraint(equalTo: helpLabel.bottomAnchor, constant: 12),
-            scrollView.leadingAnchor.constraint(equalTo: view.leadingAnchor, constant: 16),
-            scrollView.trailingAnchor.constraint(equalTo: view.trailingAnchor, constant: -16),
-            scrollView.bottomAnchor.constraint(equalTo: view.bottomAnchor, constant: -16),
+            scrollView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 16),
+            scrollView.trailingAnchor.constraint(equalTo: container.trailingAnchor, constant: -16),
+            scrollView.bottomAnchor.constraint(equalTo: container.bottomAnchor, constant: -16),
         ])
+
+        return container
     }
 
-    override func viewWillAppear() {
-        super.viewWillAppear()
-        tableView.reloadData()
+    private func buildOptionsView() -> NSView {
+        optionsView = NSView()
+        optionsView.autoresizingMask = [.width, .height]
+
+        let startLabel = NSTextField(labelWithString: "Start at login")
+        startLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        startLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        startAtLoginCheckbox = NSButton(checkboxWithTitle: "Start LauncherMenu when I sign in", target: self, action: #selector(toggleStartAtLogin(_:)))
+        startAtLoginCheckbox.translatesAutoresizingMaskIntoConstraints = false
+
+        let behaviorLabel = NSTextField(labelWithString: "When app is already open")
+        behaviorLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        behaviorLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        behaviorPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+        behaviorPopup.translatesAutoresizingMaskIntoConstraints = false
+        behaviorPopup.addItems(withTitles: AppLaunchBehavior.allCases.map { $0.title })
+        behaviorPopup.target = self
+        behaviorPopup.action = #selector(changeBehavior(_:))
+
+        optionsView.addSubview(startLabel)
+        optionsView.addSubview(startAtLoginCheckbox)
+        optionsView.addSubview(behaviorLabel)
+        optionsView.addSubview(behaviorPopup)
+
+        NSLayoutConstraint.activate([
+            startLabel.topAnchor.constraint(equalTo: optionsView.topAnchor, constant: 24),
+            startLabel.leadingAnchor.constraint(equalTo: optionsView.leadingAnchor, constant: 20),
+            startLabel.trailingAnchor.constraint(equalTo: optionsView.trailingAnchor, constant: -20),
+
+            startAtLoginCheckbox.topAnchor.constraint(equalTo: startLabel.bottomAnchor, constant: 8),
+            startAtLoginCheckbox.leadingAnchor.constraint(equalTo: optionsView.leadingAnchor, constant: 20),
+            startAtLoginCheckbox.trailingAnchor.constraint(equalTo: optionsView.trailingAnchor, constant: -20),
+
+            behaviorLabel.topAnchor.constraint(equalTo: startAtLoginCheckbox.bottomAnchor, constant: 24),
+            behaviorLabel.leadingAnchor.constraint(equalTo: optionsView.leadingAnchor, constant: 20),
+            behaviorLabel.trailingAnchor.constraint(equalTo: optionsView.trailingAnchor, constant: -20),
+
+            behaviorPopup.topAnchor.constraint(equalTo: behaviorLabel.bottomAnchor, constant: 8),
+            behaviorPopup.leadingAnchor.constraint(equalTo: optionsView.leadingAnchor, constant: 20),
+        ])
+
+        return optionsView
+    }
+
+    private func refreshOptions() {
+        startAtLoginCheckbox.state = settings.startAtLogin ? .on : .off
+        if let index = AppLaunchBehavior.allCases.firstIndex(of: settings.launchBehavior) {
+            behaviorPopup.selectItem(at: index)
+        }
+    }
+
+    @objc private func toggleStartAtLogin(_ sender: NSButton) {
+        do {
+            try settings.setStartAtLogin(sender.state == .on)
+        } catch {
+            sender.state = settings.startAtLogin ? .on : .off
+            showAlert(message: "Unable to update login item", info: error.localizedDescription)
+        }
+    }
+
+    @objc private func changeBehavior(_ sender: NSPopUpButton) {
+        guard let index = sender.indexOfSelectedItem as Int?,
+              let behavior = AppLaunchBehavior.allCases[safe: index] else {
+            return
+        }
+
+        settings.setLaunchBehavior(behavior)
+    }
+
+    private func showAlert(message: String, info: String) {
+        let alert = NSAlert()
+        alert.messageText = message
+        alert.informativeText = info
+        alert.alertStyle = .warning
+        alert.beginSheetModal(for: view.window ?? NSApp.keyWindow ?? NSWindow()) { _ in }
     }
 }
 
@@ -109,6 +224,10 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
         nameLabel.textColor = .labelColor
         nameLabel.translatesAutoresizingMaskIntoConstraints = false
 
+        let iconView = NSImageView()
+        iconView.translatesAutoresizingMaskIntoConstraints = false
+        iconView.image = appIcon(for: key)
+
         let chooseButton = NSButton(title: "Choose...", target: self, action: #selector(chooseApp(_:)))
         chooseButton.tag = key.rawValue
         chooseButton.bezelStyle = .rounded
@@ -120,12 +239,18 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
         clearButton.translatesAutoresizingMaskIntoConstraints = false
         clearButton.isEnabled = store.loadMappings().contains { $0.functionKey == key }
 
+        container.addSubview(iconView)
         container.addSubview(nameLabel)
         container.addSubview(chooseButton)
         container.addSubview(clearButton)
 
         NSLayoutConstraint.activate([
-            nameLabel.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+            iconView.leadingAnchor.constraint(equalTo: container.leadingAnchor, constant: 4),
+            iconView.centerYAnchor.constraint(equalTo: container.centerYAnchor),
+            iconView.widthAnchor.constraint(equalToConstant: 18),
+            iconView.heightAnchor.constraint(equalToConstant: 18),
+
+            nameLabel.leadingAnchor.constraint(equalTo: iconView.trailingAnchor, constant: 8),
             nameLabel.centerYAnchor.constraint(equalTo: container.centerYAnchor),
             nameLabel.trailingAnchor.constraint(lessThanOrEqualTo: chooseButton.leadingAnchor, constant: -8),
 
@@ -145,6 +270,14 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
 
         return store.resolvedAppName(for: mapping.appPath)
+    }
+
+    private func appIcon(for key: FunctionKey) -> NSImage? {
+        guard let mapping = store.loadMappings().first(where: { $0.functionKey == key }) else {
+            return nil
+        }
+
+        return store.resolvedAppIcon(for: mapping.appPath, size: 18)
     }
 
     @objc private func chooseApp(_ sender: NSButton) {

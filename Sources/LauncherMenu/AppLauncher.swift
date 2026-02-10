@@ -3,23 +3,17 @@ import AppKit
 @MainActor
 final class AppLauncher {
     static let shared = AppLauncher()
+    private let settings: AppSettingsStore
 
-    private init() {}
+    init(settings: AppSettingsStore = .shared) {
+        self.settings = settings
+    }
 
     func launchOrFocusApp(atPath path: String) {
         let url = URL(fileURLWithPath: path)
-        if let bundle = Bundle(url: url),
-           let bundleIdentifier = bundle.bundleIdentifier {
-            let runningApps = NSRunningApplication.runningApplications(withBundleIdentifier: bundleIdentifier)
-            if let runningApp = runningApps.first {
-                if runningApp.isHidden {
-                    runningApp.unhide()
-                }
-
-                if runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps]) {
-                    return
-                }
-            }
+        if settings.launchBehavior == .focusExisting,
+           focusRunningAppIfNeeded(at: url) {
+            return
         }
 
         let configuration = NSWorkspace.OpenConfiguration()
@@ -34,5 +28,24 @@ final class AppLauncher {
                 _ = app.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
             }
         }
+    }
+
+    private func focusRunningAppIfNeeded(at url: URL) -> Bool {
+        guard let bundle = Bundle(url: url),
+              let bundleIdentifier = bundle.bundleIdentifier else {
+            return false
+        }
+
+        guard let runningApp = NSRunningApplication
+            .runningApplications(withBundleIdentifier: bundleIdentifier)
+            .first else {
+            return false
+        }
+
+        if runningApp.isHidden {
+            runningApp.unhide()
+        }
+
+        return runningApp.activate(options: [.activateAllWindows, .activateIgnoringOtherApps])
     }
 }

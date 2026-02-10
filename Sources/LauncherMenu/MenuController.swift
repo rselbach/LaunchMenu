@@ -36,19 +36,17 @@ final class MenuController: NSObject {
         let mappingByKey = Dictionary(uniqueKeysWithValues: mappings.map { ($0.functionKey, $0) })
 
         for key in FunctionKey.allCases {
-            let item = NSMenuItem()
-            let mapping = mappingByKey[key]
-            if let mapping = mapping {
-                let appName = store.resolvedAppName(for: mapping.appPath)
-                item.title = "\(key.label) \u{2022} \(appName)"
-                item.representedObject = mapping.appPath
-                item.target = self
-                item.action = #selector(launchApp(_:))
-            } else {
-                item.title = "\(key.label) \u{2022} Unassigned"
-                item.isEnabled = false
+            guard let mapping = mappingByKey[key] else {
+                continue
             }
 
+            let item = NSMenuItem()
+            let appName = store.resolvedAppName(for: mapping.appPath)
+            item.title = "\(key.label) \u{2022} \(appName)"
+            item.image = store.resolvedAppIcon(for: mapping.appPath)
+            item.representedObject = mapping.appPath
+            item.target = self
+            item.action = #selector(launchApp(_:))
             menu.addItem(item)
         }
 
@@ -73,6 +71,8 @@ final class MenuController: NSObject {
 
     @objc private func openSettings() {
         SettingsWindowController.shared.showWindow(nil)
+        SettingsWindowController.shared.window?.makeKeyAndOrderFront(nil)
+        NSApp.setActivationPolicy(.regular)
         NSApp.activate(ignoringOtherApps: true)
     }
 

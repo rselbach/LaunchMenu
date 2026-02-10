@@ -39,4 +39,15 @@ final class AppMappingsStore: @unchecked Sendable {
         let url = URL(fileURLWithPath: path)
         return FileManager.default.displayName(atPath: url.path)
     }
+
+    func resolvedAppIcon(for path: String, size: CGFloat = 16) -> NSImage? {
+        guard FileManager.default.fileExists(atPath: path) else {
+            return nil
+        }
+
+        let icon = NSWorkspace.shared.icon(forFile: path)
+        icon.size = NSSize(width: size, height: size)
+        icon.isTemplate = false
+        return icon
+    }
 }
