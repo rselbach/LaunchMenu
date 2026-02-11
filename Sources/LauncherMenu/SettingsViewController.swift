@@ -1,17 +1,21 @@
 import AppKit
+import Sparkle
 
 @MainActor
 final class SettingsViewController: NSViewController {
     private let store: AppMappingsStore
     private let settings: AppSettingsStore
+    private var updater: SPUUpdater?
     private var tableView = NSTableView()
     private var optionsView = NSView()
     private var startAtLoginCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private var behaviorPopup = NSPopUpButton(frame: .zero, pullsDown: false)
+    private var autoUpdateCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
 
-    init(store: AppMappingsStore = .shared, settings: AppSettingsStore = .shared) {
+    init(store: AppMappingsStore = .shared, settings: AppSettingsStore = .shared, updater: SPUUpdater?) {
         self.store = store
         self.settings = settings
+        self.updater = updater
         super.init(nibName: nil, bundle: nil)
     }
 
@@ -52,6 +56,13 @@ final class SettingsViewController: NSViewController {
         super.viewWillAppear()
         tableView.reloadData()
         refreshOptions()
+    }
+
+    func setUpdater(_ updater: SPUUpdater?) {
+        self.updater = updater
+        if isViewLoaded {
+            refreshOptions()
+        }
     }
 
     private func buildMappingsView() -> NSView {
@@ -127,10 +138,19 @@ final class SettingsViewController: NSViewController {
         behaviorPopup.target = self
         behaviorPopup.action = #selector(changeBehavior(_:))
 
+        let updatesLabel = NSTextField(labelWithString: "Updates")
+        updatesLabel.font = NSFont.systemFont(ofSize: 13, weight: .medium)
+        updatesLabel.translatesAutoresizingMaskIntoConstraints = false
+
+        autoUpdateCheckbox = NSButton(checkboxWithTitle: "Check for updates automatically", target: self, action: #selector(toggleAutomaticUpdates(_:)))
+        autoUpdateCheckbox.translatesAutoresizingMaskIntoConstraints = false
+
         optionsView.addSubview(startLabel)
         optionsView.addSubview(startAtLoginCheckbox)
         optionsView.addSubview(behaviorLabel)
         optionsView.addSubview(behaviorPopup)
+        optionsView.addSubview(updatesLabel)
+        optionsView.addSubview(autoUpdateCheckbox)
 
         NSLayoutConstraint.activate([
             startLabel.topAnchor.constraint(equalTo: optionsView.topAnchor, constant: 24),
@@ -147,6 +167,14 @@ final class SettingsViewController: NSViewController {
 
             behaviorPopup.topAnchor.constraint(equalTo: behaviorLabel.bottomAnchor, constant: 8),
             behaviorPopup.leadingAnchor.constraint(equalTo: optionsView.leadingAnchor, constant: 20),
+
+            updatesLabel.topAnchor.constraint(equalTo: behaviorPopup.bottomAnchor, constant: 24),
+            updatesLabel.leadingAnchor.constraint(equalTo: optionsView.leadingAnchor, constant: 20),
+            updatesLabel.trailingAnchor.constraint(equalTo: optionsView.trailingAnchor, constant: -20),
+
+            autoUpdateCheckbox.topAnchor.constraint(equalTo: updatesLabel.bottomAnchor, constant: 8),
+            autoUpdateCheckbox.leadingAnchor.constraint(equalTo: optionsView.leadingAnchor, constant: 20),
+            autoUpdateCheckbox.trailingAnchor.constraint(equalTo: optionsView.trailingAnchor, constant: -20),
         ])
 
         return optionsView
@@ -157,6 +185,9 @@ final class SettingsViewController: NSViewController {
         if let index = AppLaunchBehavior.allCases.firstIndex(of: settings.launchBehavior) {
             behaviorPopup.selectItem(at: index)
         }
+
+        autoUpdateCheckbox.isEnabled = updater != nil
+        autoUpdateCheckbox.state = updater?.automaticallyChecksForUpdates == true ? .on : .off
     }
 
     @objc private func toggleStartAtLogin(_ sender: NSButton) {
@@ -175,6 +206,10 @@ final class SettingsViewController: NSViewController {
         }
 
         settings.setLaunchBehavior(behavior)
+    }
+
+    @objc private func toggleAutomaticUpdates(_ sender: NSButton) {
+        updater?.automaticallyChecksForUpdates = sender.state == .on
     }
 
     private func showAlert(message: String, info: String) {

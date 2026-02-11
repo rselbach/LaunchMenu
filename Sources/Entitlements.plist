@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>com.apple.security.app-sandbox</key>
+    <true/>
+
+    <!-- Required by Sparkle to check/download updates -->
+    <key>com.apple.security.network.client</key>
+    <true/>
+
+    <!-- Required to register as a login item with SMAppService.mainApp. -->
+    <key>com.apple.security.application-groups</key>
+    <array>
+        <string>group.com.rselbach.LauncherMenu</string>
+    </array>
+
+    <!-- Required by Sparkle helper services in sandboxed app builds -->
+    <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
+    <array>
+        <string>com.rselbach.LauncherMenu-spks</string>
+        <string>com.rselbach.LauncherMenu-spki</string>
+    </array>
+</dict>
+</plist>

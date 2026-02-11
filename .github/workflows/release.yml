@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: write
+  pages: write
   id-token: write
 
 jobs:
@@ -63,6 +64,17 @@ jobs:
           swift build -c release
           ./scripts/bundle-app.sh release
 
+      - name: Smoke check bundled release assets
+        run: |
+          APP_CONTENTS=".build/release-bundle/LauncherMenu.app/Contents"
+          for path in \
+            "${APP_CONTENTS}/Frameworks/Sparkle.framework"; do
+            if [[ ! -e "${path}" ]]; then
+              echo "::error::Missing required bundle artifact: ${path}"
+              exit 1
+            fi
+          done
+
       - name: Import signing certificate
         env:
           CERTIFICATE_P12: ${{ secrets.DEVELOPER_ID_CERTIFICATE_P12 }}
@@ -92,6 +104,7 @@ jobs:
         env:
           APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         run: |
+          SPARKLE_FW=".build/release-bundle/LauncherMenu.app/Contents/Frameworks/Sparkle.framework"
           SIGNING_IDENTITY="$(security find-identity -v -p codesigning | grep "Developer ID Application" | grep "(${APPLE_TEAM_ID})" | head -n1 | sed -E 's/.*"(.*)"/\1/')"
 
           if [[ -z "${SIGNING_IDENTITY}" ]]; then
@@ -99,12 +112,40 @@ jobs:
             exit 1
           fi
 
+          # Sign Sparkle XPC services individually (no entitlements - they must not be sandboxed)
           codesign --force --options runtime \
             --sign "${SIGNING_IDENTITY}" \
-            .build/release-bundle/LauncherMenu.app/Contents/MacOS/LauncherMenu
+            "${SPARKLE_FW}/Versions/B/XPCServices/Installer.xpc"
 
           codesign --force --options runtime \
             --sign "${SIGNING_IDENTITY}" \
+            --preserve-metadata=entitlements \
+            "${SPARKLE_FW}/Versions/B/XPCServices/Downloader.xpc"
+
+          # Sign Sparkle helper apps
+          codesign --force --options runtime \
+            --sign "${SIGNING_IDENTITY}" \
+            "${SPARKLE_FW}/Versions/B/Autoupdate"
+
+          codesign --force --options runtime \
+            --sign "${SIGNING_IDENTITY}" \
+            "${SPARKLE_FW}/Versions/B/Updater.app"
+
+          # Sign Sparkle framework itself
+          codesign --force --options runtime \
+            --sign "${SIGNING_IDENTITY}" \
+            "${SPARKLE_FW}"
+
+          # Sign main executable with entitlements
+          codesign --force --options runtime \
+            --sign "${SIGNING_IDENTITY}" \
+            --entitlements Sources/Entitlements.plist \
+            .build/release-bundle/LauncherMenu.app/Contents/MacOS/LauncherMenu
+
+          # Sign app bundle with entitlements
+          codesign --force --options runtime \
+            --sign "${SIGNING_IDENTITY}" \
+            --entitlements Sources/Entitlements.plist \
             .build/release-bundle/LauncherMenu.app
 
       - name: Create DMG
@@ -161,6 +202,46 @@ jobs:
         run: |
           mv .build/dmg/LauncherMenu.dmg ".build/dmg/LauncherMenu-${APP_VERSION}.dmg"
 
+      - name: Sign DMG for Sparkle
+        env:
+          SPARKLE_EDDSA_PRIVATE_KEY: ${{ secrets.SPARKLE_EDDSA_PRIVATE_KEY }}
+          APP_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          SIGN_UPDATE=".build/artifacts/sparkle/Sparkle/bin/sign_update"
+          chmod +x "${SIGN_UPDATE}"
+
+          SIGNATURE=$("${SIGN_UPDATE}" ".build/dmg/LauncherMenu-${APP_VERSION}.dmg" --ed-key-file <(echo -n "${SPARKLE_EDDSA_PRIVATE_KEY}"))
+          echo "SPARKLE_SIGNATURE=${SIGNATURE}" >> "$GITHUB_ENV"
+
+      - name: Generate appcast
+        env:
+          APP_VERSION: ${{ steps.version.outputs.version }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          VERSION="${APP_VERSION}"
+          PUB_DATE=$(date -u +"%a, %d %b %Y %H:%M:%S %z")
+
+          mkdir -p .build/pages
+
+          printf '<?xml version="1.0" encoding="utf-8"?>\n' > .build/pages/appcast.xml
+          printf '<rss version="2.0" xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle">\n' >> .build/pages/appcast.xml
+          printf '  <channel>\n' >> .build/pages/appcast.xml
+          printf '    <title>LauncherMenu</title>\n' >> .build/pages/appcast.xml
+          printf '    <item>\n' >> .build/pages/appcast.xml
+          printf '      <title>Version %s</title>\n' "${VERSION}" >> .build/pages/appcast.xml
+          printf '      <pubDate>%s</pubDate>\n' "${PUB_DATE}" >> .build/pages/appcast.xml
+          printf '      <enclosure url="https://github.com/rselbach/LauncherMenu/releases/download/v%s/LauncherMenu-%s.dmg"\n' "${VERSION}" "${VERSION}" >> .build/pages/appcast.xml
+          printf '                 %s\n' "${SPARKLE_SIGNATURE}" >> .build/pages/appcast.xml
+          printf '                 type="application/octet-stream"/>\n' >> .build/pages/appcast.xml
+          printf '      <sparkle:version>%s</sparkle:version>\n' "${BUILD_NUMBER}" >> .build/pages/appcast.xml
+          printf '      <sparkle:shortVersionString>%s</sparkle:shortVersionString>\n' "${VERSION}" >> .build/pages/appcast.xml
+          printf '      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>\n' >> .build/pages/appcast.xml
+          printf '    </item>\n' >> .build/pages/appcast.xml
+          printf '  </channel>\n' >> .build/pages/appcast.xml
+          printf '</rss>\n' >> .build/pages/appcast.xml
+
+          cat .build/pages/appcast.xml
+
       - name: Upload DMG artifact
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
@@ -173,6 +254,16 @@ jobs:
         with:
           files: .build/dmg/LauncherMenu-${{ steps.version.outputs.version }}.dmg
           generate_release_notes: true
+
+      - name: Upload Pages artifact
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/upload-pages-artifact@7b1f4a764d45c48632c6b24a0339c27f5614fb0b # v4.0.0
+        with:
+          path: .build/pages
+
+      - name: Deploy to GitHub Pages
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/deploy-pages@d6db90164ac5ed86f2b6aed7e0febac5b3c0c03e # v4
 
       - name: Cleanup keychain
         if: always()

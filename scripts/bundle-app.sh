@@ -21,21 +21,51 @@ swift_bin_path() {
   swift build -c "${config}" --show-bin-path
 }
 
+detect_arch() {
+  uname -m
+}
+
+find_sparkle() {
+  local bin_path="$1" arch="$2" config="$3"
+
+  local candidates=(
+    "${bin_path}/Sparkle.framework"
+    "$(dirname "${bin_path}")/Sparkle.framework"
+    "${PROJECT_ROOT}/.build/${arch}-apple-macosx/${config}/Sparkle.framework"
+    "${PROJECT_ROOT}/.build/artifacts/sparkle/Sparkle/Sparkle.framework"
+  )
+
+  local candidate
+  for candidate in "${candidates[@]}"; do
+    if [[ -d "${candidate}" ]]; then
+      echo "${candidate}"
+      return
+    fi
+  done
+
+  err "Sparkle.framework not found; run 'swift build -c ${config}' first"
+}
+
 sign_bundle() {
   local bundle="$1"
   local contents="${bundle}/Contents"
+  local framework="${contents}/Frameworks/Sparkle.framework"
   local executable="${contents}/MacOS/${APP_NAME}"
   local identity="-"
 
+  [[ -d "${framework}" ]] || err "missing Sparkle.framework at ${framework}"
   [[ -f "${executable}" ]] || err "missing executable at ${executable}"
 
   # Signing order matters for nested app bundles/frameworks.
+  codesign --force --deep --sign "${identity}" --timestamp=none "${framework}"
   codesign --force --sign "${identity}" --timestamp=none "${executable}"
   codesign --force --sign "${identity}" --timestamp=none "${bundle}"
 }
 
 create_bundle() {
   local config="$1"
+  local arch
+  arch="$(detect_arch)"
   local bin_path
   bin_path="$(swift_bin_path "${config}")"
 
@@ -48,12 +78,21 @@ create_bundle() {
 
   rm -rf "${bundle}"
   mkdir -p "${contents}/MacOS" \
-           "${contents}/Resources"
+           "${contents}/Resources" \
+           "${contents}/Frameworks"
 
   cp "${executable}" "${contents}/MacOS/${APP_NAME}"
   cp "${PROJECT_ROOT}/Sources/Info.plist" "${contents}/Info.plist"
   cp "${PROJECT_ROOT}/Sources/Resources/AppIcon.icns" \
     "${contents}/Resources/AppIcon.icns"
+
+  local sparkle
+  sparkle="$(find_sparkle "${bin_path}" "${arch}" "${config}")"
+  cp -R "${sparkle}" "${contents}/Frameworks/"
+
+  install_name_tool -add_rpath \
+    @executable_path/../Frameworks \
+    "${contents}/MacOS/${APP_NAME}"
 
   printf 'APPL????' > "${contents}/PkgInfo"
   sign_bundle "${bundle}"

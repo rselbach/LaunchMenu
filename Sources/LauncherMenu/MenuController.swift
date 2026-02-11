@@ -1,13 +1,16 @@
 import AppKit
+import Sparkle
 
 @MainActor
 final class MenuController: NSObject {
     private let statusItem: NSStatusItem
     private let menu = NSMenu()
     private let store: AppMappingsStore
+    private let updater: SPUUpdater?
 
-    init(store: AppMappingsStore = .shared) {
+    init(store: AppMappingsStore = .shared, updater: SPUUpdater?) {
         self.store = store
+        self.updater = updater
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.squareLength)
 
         super.init()
@@ -56,6 +59,13 @@ final class MenuController: NSObject {
         settingsItem.target = self
         menu.addItem(settingsItem)
 
+        if updater != nil {
+            let updatesItem = NSMenuItem(title: "Check for Updates...", action: #selector(checkForUpdates), keyEquivalent: "")
+            updatesItem.target = self
+            updatesItem.isEnabled = updater?.canCheckForUpdates ?? false
+            menu.addItem(updatesItem)
+        }
+
         let quitItem = NSMenuItem(title: "Quit LauncherMenu", action: #selector(quit), keyEquivalent: "q")
         quitItem.target = self
         menu.addItem(quitItem)
@@ -78,5 +88,9 @@ final class MenuController: NSObject {
 
     @objc private func quit() {
         NSApp.terminate(nil)
+    }
+
+    @objc private func checkForUpdates() {
+        updater?.checkForUpdates()
     }
 }

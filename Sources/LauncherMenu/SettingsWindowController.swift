@@ -1,11 +1,13 @@
 import AppKit
+import Sparkle
 
 @MainActor
 final class SettingsWindowController: NSWindowController {
     static let shared = SettingsWindowController()
+    private let viewController: SettingsViewController
 
     private init() {
-        let viewController = SettingsViewController()
+        viewController = SettingsViewController(updater: nil)
         let window = NSWindow(contentViewController: viewController)
         window.title = "LauncherMenu Settings"
         window.styleMask = [.titled, .closable, .miniaturizable]
@@ -21,6 +23,10 @@ final class SettingsWindowController: NSWindowController {
             name: NSWindow.willCloseNotification,
             object: window
         )
+    }
+
+    func setUpdater(_ updater: SPUUpdater?) {
+        viewController.setUpdater(updater)
     }
 
     @available(*, unavailable)
