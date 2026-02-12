@@ -326,13 +326,20 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
         panel.canChooseDirectories = false
         panel.allowedContentTypes = [.application]
         panel.prompt = "Select"
+        panel.directoryURL = URL(fileURLWithPath: "/Applications")
 
-        panel.beginSheetModal(for: view.window ?? NSApp.keyWindow ?? NSWindow()) { [weak self] response in
+        let handlePanelResponse: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard response == .OK, let url = panel.url else {
                 return
             }
 
             self?.updateMapping(for: key, with: url.path)
+        }
+
+        if let window = view.window ?? NSApp.keyWindow {
+            panel.beginSheetModal(for: window, completionHandler: handlePanelResponse)
+        } else {
+            panel.begin(completionHandler: handlePanelResponse)
         }
     }
 
