@@ -230,7 +230,7 @@ jobs:
           printf '    <item>\n' >> .build/pages/appcast.xml
           printf '      <title>Version %s</title>\n' "${VERSION}" >> .build/pages/appcast.xml
           printf '      <pubDate>%s</pubDate>\n' "${PUB_DATE}" >> .build/pages/appcast.xml
-          printf '      <enclosure url="https://github.com/rselbach/LauncherMenu/releases/download/v%s/LauncherMenu-%s.dmg"\n' "${VERSION}" "${VERSION}" >> .build/pages/appcast.xml
+          printf '      <enclosure url="https://github.com/rselbach/LaunchMenu/releases/download/v%s/LauncherMenu-%s.dmg"\n' "${VERSION}" "${VERSION}" >> .build/pages/appcast.xml
           printf '                 %s\n' "${SPARKLE_SIGNATURE}" >> .build/pages/appcast.xml
           printf '                 type="application/octet-stream"/>\n' >> .build/pages/appcast.xml
           printf '      <sparkle:version>%s</sparkle:version>\n' "${BUILD_NUMBER}" >> .build/pages/appcast.xml
