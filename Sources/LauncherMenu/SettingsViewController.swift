@@ -11,6 +11,7 @@ final class SettingsViewController: NSViewController {
     private var startAtLoginCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
     private var behaviorPopup = NSPopUpButton(frame: .zero, pullsDown: false)
     private var autoUpdateCheckbox = NSButton(checkboxWithTitle: "", target: nil, action: nil)
+    private var openPanel: NSOpenPanel?
 
     init(store: AppMappingsStore = .shared, settings: AppSettingsStore = .shared, updater: SPUUpdater?) {
         self.store = store
@@ -321,6 +322,7 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
         }
 
         let panel = NSOpenPanel()
+        openPanel = panel
         panel.allowsMultipleSelection = false
         panel.canChooseFiles = true
         panel.canChooseDirectories = false
@@ -330,10 +332,12 @@ extension SettingsViewController: NSTableViewDataSource, NSTableViewDelegate {
 
         let handlePanelResponse: (NSApplication.ModalResponse) -> Void = { [weak self] response in
             guard response == .OK, let url = panel.url else {
+                self?.openPanel = nil
                 return
             }
 
             self?.updateMapping(for: key, with: url.path)
+            self?.openPanel = nil
         }
 
         if let window = view.window ?? NSApp.keyWindow {
