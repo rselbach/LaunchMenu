@@ -15,6 +15,10 @@
         <string>group.com.rselbach.LauncherMenu</string>
     </array>
 
+    <!-- Required to allow NSOpenPanel selection in sandboxed release builds. -->
+    <key>com.apple.security.files.user-selected.read-only</key>
+    <true/>
+
     <!-- Required by Sparkle helper services in sandboxed app builds -->
     <key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
     <array>
